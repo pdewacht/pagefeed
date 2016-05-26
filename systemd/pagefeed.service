@@ -1,0 +1,17 @@
+[Unit]
+Description=pagefeed
+
+[Service]
+ExecStart=/usr/local/sbin/pagefeed
+StandardInput=socket
+Restart=on-failure
+User=pagefeed
+Group=pagefeed
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

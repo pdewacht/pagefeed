@@ -1,0 +1,25 @@
+[package]
+name = "pagefeed"
+version = "0.1.0"
+authors = ["Peter De Wachter <pdewacht@gmail.com>"]
+license = "GPL-2.0+"
+publish = false
+
+[dependencies]
+chrono = "^0.2.22"
+fastcgi = "^1.0.0-beta"
+rss = "^0.3.1"
+scoped_threadpool = "^0.1.7"
+tiny-keccak = "^1.0.5"
+
+[dependencies.hyper]
+version = "^0.9.5"
+default-features = false
+
+[dependencies.postgres]
+version = "^0.11.7"
+features = ["unix_socket", "uuid", "chrono"]
+
+[dependencies.uuid]
+version = "^0.2.2"
+features = ["v4"]
