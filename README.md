@@ -21,6 +21,7 @@ Finally, you need to configure your web server. E.g. if you use nginx:
 
     location /pagefeed {
       include fastcgi.conf;
+      fastcgi_param SCRIPT_NAME /pagefeed;
       fastcgi_pass unix:/run/pagefeed.socket;
 
       allow 127.0.0.1;

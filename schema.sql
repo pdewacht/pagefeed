@@ -1,6 +1,9 @@
+-- create extension ltree;
+
 create table pages (
   name              varchar(100) primary key,
   url               varchar(200) not null,
+  category          ltree not null default '',
   check_interval    interval not null default '1:50',
   cooldown          interval not null default '23:50',
 

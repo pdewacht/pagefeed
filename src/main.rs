@@ -55,9 +55,11 @@ fn database_url() -> String {
 fn handle_request(req: &mut fastcgi::Request,
                   conn: &postgres::GenericConnection)
                   -> Result<(), PagefeedError> {
+    let filter = get_pathinfo(req).trim_matches('/').replace('/', ".");
+
     let trans = try!(conn.transaction());
-    try!(process_unchecked_pages(&trans));
-    let pages = try!(get_all_pages(&trans));
+    try!(process_unchecked_pages(&trans, &filter));
+    let pages = try!(get_pages(&trans, &filter));
     trans.set_commit();
 
     let response = build_feed(&pages);
@@ -65,6 +67,17 @@ fn handle_request(req: &mut fastcgi::Request,
     try!(req.stdout().write(response.as_bytes()));
     Ok(())
 }
+
+fn get_pathinfo(req: &fastcgi::Request) -> String {
+    let request_uri = req.param("REQUEST_URI").unwrap_or("".into());
+    let script_name = req.param("SCRIPT_NAME").unwrap_or("".into());
+    if request_uri.starts_with(&script_name) {
+        request_uri[script_name.len()..].into()
+    } else {
+        request_uri
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 
@@ -138,10 +151,10 @@ enum PageStatus {
 
 const POOL_SIZE : u32 = 5;
 
-fn process_unchecked_pages(conn: &postgres::GenericConnection)
+fn process_unchecked_pages(conn: &postgres::GenericConnection, filter: &str)
                            -> Result<(), postgres::error::Error> {
     let now = chrono::UTC::now();
-    let pages = try!(get_unchecked_pages(conn));
+    let pages = try!(get_unchecked_pages(conn, filter));
     let statuses = check_pages(&pages);
     for (page, status) in pages.iter().zip(statuses.iter()) {
         match *status {
@@ -241,25 +254,31 @@ impl<'a> io::Write for KeccakWriter<'a> {
 
 // ----------------------------------------------------------------------------
 
-fn get_all_pages(conn: &postgres::GenericConnection)
+fn get_pages(conn: &postgres::GenericConnection, filter: &str)
                  -> Result<Vec<Page>, postgres::error::Error> {
-    let query = "select * from pages";
-    conn.query(query, &[]).map(|rows| {
+    let query = "
+select name, url, last_modified, last_error, item_id, http_etag, http_body_hash
+from pages
+where category <@ $1::text::ltree
+";
+    conn.query(query, &[&filter]).map(|rows| {
         rows.iter().map(instantiate_page).collect()
     })
 }
 
-fn get_unchecked_pages(conn: &postgres::GenericConnection)
+fn get_unchecked_pages(conn: &postgres::GenericConnection, filter: &str)
                        -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
-select * from pages
-where last_checked is null
-or current_timestamp > greatest(
-  last_checked + check_interval,
-  last_modified + cooldown)
+select name, url, last_modified, last_error, item_id, http_etag, http_body_hash
+from pages
+where category <@ $1::text::ltree
+and (last_checked is null
+  or current_timestamp > greatest(
+    last_checked + check_interval,
+    last_modified + cooldown))
 for update
 ";
-    conn.query(query, &[]).map(|rows| {
+    conn.query(query, &[&filter]).map(|rows| {
         rows.iter().map(instantiate_page).collect()
     })
 }
