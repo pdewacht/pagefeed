@@ -30,7 +30,7 @@ struct Page {
 
 fn main() {
     let conn = postgres::Connection::connect(
-        database_url().as_ref(), postgres::SslMode::None).unwrap();
+        database_url().as_ref(), postgres::TlsMode::None).unwrap();
 
     fastcgi::run(|mut req| {
         if Some("GET") != req.param("REQUEST_METHOD").as_ref().map(String::as_ref) {
