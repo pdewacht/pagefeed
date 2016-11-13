@@ -2,6 +2,7 @@ extern crate chrono;
 extern crate fastcgi;
 extern crate hyper;
 extern crate postgres;
+extern crate regex;
 extern crate rss;
 extern crate scoped_threadpool;
 extern crate tiny_keccak;
@@ -22,6 +23,8 @@ struct Page {
 
     http_etag: Option<String>,
     http_body_hash: Option<Vec<u8>>,
+
+    delete_regex: Option<String>,
 
     // Other fields only used in SQL queries
 }
@@ -86,6 +89,8 @@ enum PagefeedError {
     Io(io::Error),
     Postgres(postgres::error::Error),
     PostgresConnection(postgres::error::ConnectError),
+    Hyper(hyper::Error),
+    Regex(regex::Error),
 }
 
 impl From<io::Error> for PagefeedError {
@@ -103,6 +108,18 @@ impl From<postgres::error::Error> for PagefeedError {
 impl From<postgres::error::ConnectError> for PagefeedError {
     fn from(err: postgres::error::ConnectError) -> PagefeedError {
         PagefeedError::PostgresConnection(err)
+    }
+}
+
+impl From<hyper::Error> for PagefeedError {
+    fn from(err: hyper::Error) -> PagefeedError {
+        PagefeedError::Hyper(err)
+    }
+}
+
+impl From<regex::Error> for PagefeedError {
+    fn from(err: regex::Error) -> PagefeedError {
+        PagefeedError::Regex(err)
     }
 }
 
@@ -199,17 +216,19 @@ fn check_page(page: &Page) -> PageStatus {
     let mut client = Client::new();
     client.set_redirect_policy(RedirectPolicy::FollowAll);
 
-    let status = client.get(&page.url).headers(headers).send().and_then(|mut response| {
-        if response.status == StatusCode::NotModified {
-            Ok(PageStatus::Unmodified)
-        } else {
-            let etag = extract_etag(&response);
-            let hash = try!(hash(&mut response));
-            Ok(PageStatus::Modified { body_hash: hash, etag: etag })
-        }
-    }).unwrap_or_else(|err| {
-        PageStatus::FetchError(format!("{}", err))
-    });
+    let status = client.get(&page.url).headers(headers).send()
+        .map_err(PagefeedError::from)
+        .and_then(|mut response| {
+            if response.status == StatusCode::NotModified {
+                Ok(PageStatus::Unmodified)
+            } else {
+                let etag = extract_etag(&response);
+                let hash = try!(hash(page, &mut response));
+                Ok(PageStatus::Modified { body_hash: hash, etag: etag })
+            }
+        }).unwrap_or_else(|err| {
+            PageStatus::FetchError(format!("{:?}", err))
+        });
 
     match status {
         PageStatus::Modified { ref body_hash, .. }
@@ -232,24 +251,20 @@ fn extract_etag(r: &hyper::client::response::Response) -> Option<String> {
 
 // ----------------------------------------------------------------------------
 
-fn hash(r: &mut io::Read) -> Result<Vec<u8>, io::Error> {
+fn hash(page: &Page, r: &mut io::Read) -> Result<Vec<u8>, PagefeedError> {
+    let mut buf = Vec::new();
+    try!(r.read_to_end(&mut buf));
+
+    if let Some(delete_regex) = page.delete_regex.as_ref() {
+        let re = try!(regex::bytes::Regex::new(delete_regex));
+        buf = re.replace_all(&buf, &b""[..]);
+    }
+
     let mut sha3 = tiny_keccak::Keccak::new_sha3_256();
-    try!(io::copy(r, &mut KeccakWriter(&mut sha3)));
+    sha3.update(&buf);
     let mut res: [u8; 32] = [0; 32];
     sha3.finalize(&mut res);
     Ok(res.to_vec())
-}
-
-struct KeccakWriter<'a> (&'a mut tiny_keccak::Keccak);
-
-impl<'a> io::Write for KeccakWriter<'a> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.update(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
 }
 
 // ----------------------------------------------------------------------------
@@ -257,7 +272,7 @@ impl<'a> io::Write for KeccakWriter<'a> {
 fn get_pages(conn: &postgres::GenericConnection, filter: &str)
                  -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
-select name, url, last_modified, last_error, item_id, http_etag, http_body_hash
+select name, url, last_modified, last_error, item_id, http_etag, http_body_hash, delete_regex
 from pages
 where category <@ $1::text::ltree
 ";
@@ -269,7 +284,7 @@ where category <@ $1::text::ltree
 fn get_unchecked_pages(conn: &postgres::GenericConnection, filter: &str)
                        -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
-select name, url, last_modified, last_error, item_id, http_etag, http_body_hash
+select name, url, last_modified, last_error, item_id, http_etag, http_body_hash, delete_regex
 from pages
 where category <@ $1::text::ltree
 and (last_checked is null
@@ -292,6 +307,7 @@ fn instantiate_page(row: postgres::rows::Row) -> Page {
         item_id: row.get("item_id"),
         http_etag: row.get("http_etag"),
         http_body_hash: row.get("http_body_hash"),
+        delete_regex: row.get("delete_regex"),
     }
 }
 
