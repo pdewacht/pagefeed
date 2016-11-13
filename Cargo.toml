@@ -8,13 +8,10 @@ publish = false
 [dependencies]
 chrono = "^0.2.22"
 fastcgi = "^1.0.0-beta"
+hyper = "^0.9.5"
 rss = "^0.3.1"
 scoped_threadpool = "^0.1.7"
 tiny-keccak = "^1.1.0"
-
-[dependencies.hyper]
-version = "^0.9.5"
-default-features = false
 
 [dependencies.postgres]
 version = "^0.13.1"
