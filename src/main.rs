@@ -291,6 +291,7 @@ and (last_checked is null
   or current_timestamp > greatest(
     last_checked + check_interval,
     last_modified + cooldown))
+and enabled
 for update
 ";
     conn.query(query, &[&filter]).map(|rows| {
