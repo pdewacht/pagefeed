@@ -265,7 +265,7 @@ fn hash(page: &Page, r: &mut io::Read) -> Result<Vec<u8>, PagefeedError> {
 
     if let Some(delete_regex) = page.delete_regex.as_ref() {
         let re = try!(regex::bytes::Regex::new(delete_regex));
-        buf = re.replace_all(&buf, &b""[..]);
+        buf = re.replace_all(&buf, &b""[..]).into_owned();
     }
 
     let mut sha3 = tiny_keccak::Keccak::new_sha3_256();
