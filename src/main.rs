@@ -67,7 +67,7 @@ fn handle_request(req: &mut fastcgi::Request,
 
     let response = build_feed(&pages);
     try!(req.stdout().write(b"Content-Type: application/rss+xml\n\n"));
-    try!(req.stdout().write(response.as_bytes()));
+    try!(response.write_to(req.stdout()));
     Ok(())
 }
 
@@ -91,6 +91,7 @@ enum PagefeedError {
     PostgresConnection(postgres::error::ConnectError),
     Hyper(hyper::Error),
     Regex(regex::Error),
+    Rss(rss::Error),
 }
 
 impl From<io::Error> for PagefeedError {
@@ -123,9 +124,15 @@ impl From<regex::Error> for PagefeedError {
     }
 }
 
+impl From<rss::Error> for PagefeedError {
+    fn from(err: rss::Error) -> PagefeedError {
+        PagefeedError::Rss(err)
+    }
+}
+
 // ----------------------------------------------------------------------------
 
-fn build_feed(pages: &Vec<Page>) -> String {
+fn build_feed(pages: &Vec<Page>) -> rss::Channel {
     let items = pages.iter().filter(|page| {
         page.last_modified.is_some()
     }).map(|page| {
@@ -135,20 +142,20 @@ fn build_feed(pages: &Vec<Page>) -> String {
             link: Some(page.url.to_owned()),
             pub_date: Some(page.last_modified.unwrap().to_rfc2822()),
             guid: Some(rss::Guid {
-                is_perma_link: false,
+                is_permalink: false,
                 value: format!("{}", page.item_id.unwrap().urn()),
             }),
             ..Default::default()
         }
     }).collect();
 
-    rss::Rss(rss::Channel {
+    rss::Channel {
         title: String::from("Pagefeed"),
         link: String::from("urn:x-pagefeed:nowhere"),
         description: String::from("Pagefeed checks web pages for updates."),
         items: items,
         ..Default::default()
-    }).to_string()
+    }
 }
 
 fn describe_page_status(page: &Page) -> String {
