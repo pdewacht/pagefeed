@@ -201,15 +201,16 @@ fn check_pages(pages: &Vec<Page>) -> Vec<PageStatus> {
 }
 
 fn check_page(page: &Page) -> PageStatus {
-    use hyper::header::{Headers, IfNoneMatch, EntityTag};
     use hyper::client::{Client, RedirectPolicy};
+    use hyper::header;
     use hyper::status::StatusCode;
     use std::str::FromStr;
 
-    let mut headers = Headers::new();
+    let mut headers = header::Headers::new();
+    headers.set(header::UserAgent("Mozilla/5.0".to_owned()));
     if let Some(ref etag) = page.http_etag {
-        if let Ok(etag) = EntityTag::from_str(etag) {
-            headers.set(IfNoneMatch::Items(vec![etag]));
+        if let Ok(etag) = header::EntityTag::from_str(etag) {
+            headers.set(header::IfNoneMatch::Items(vec![etag]));
         }
     }
 
