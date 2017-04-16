@@ -66,8 +66,11 @@ fn handle_request(req: &mut fastcgi::Request,
     trans.set_commit();
 
     let response = build_feed(&pages);
-    try!(req.stdout().write(b"Content-Type: application/rss+xml\n\n"));
-    try!(response.write_to(req.stdout()));
+
+    let mut w = io::BufWriter::new(req.stdout());
+    try!(w.write(b"Content-Type: application/rss+xml\n\n"));
+    try!(response.write_to(&mut w));
+    try!(w.flush());
     Ok(())
 }
 
