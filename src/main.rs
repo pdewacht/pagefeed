@@ -11,13 +11,13 @@ extern crate uuid;
 use std::io;
 use std::io::Write;
 
-type UTCDateTime = chrono::DateTime<chrono::UTC>;
+type UtcDateTime = chrono::DateTime<chrono::Utc>;
 
 struct Page {
     name: String,
     url: String,
 
-    last_modified: Option<UTCDateTime>,
+    last_modified: Option<UtcDateTime>,
     last_error: Option<String>,
     item_id: Option<uuid::Uuid>,
 
@@ -91,7 +91,6 @@ fn get_pathinfo(req: &fastcgi::Request) -> String {
 enum PagefeedError {
     Io(io::Error),
     Postgres(postgres::error::Error),
-    PostgresConnection(postgres::error::ConnectError),
     Hyper(hyper::Error),
     Regex(regex::Error),
     Rss(rss::Error),
@@ -106,12 +105,6 @@ impl From<io::Error> for PagefeedError {
 impl From<postgres::error::Error> for PagefeedError {
     fn from(err: postgres::error::Error) -> PagefeedError {
         PagefeedError::Postgres(err)
-    }
-}
-
-impl From<postgres::error::ConnectError> for PagefeedError {
-    fn from(err: postgres::error::ConnectError) -> PagefeedError {
-        PagefeedError::PostgresConnection(err)
     }
 }
 
@@ -180,7 +173,7 @@ const POOL_SIZE : u32 = 5;
 
 fn process_unchecked_pages(conn: &postgres::GenericConnection, filter: &str)
                            -> Result<(), postgres::error::Error> {
-    let now = chrono::UTC::now();
+    let now = chrono::Utc::now();
     let pages = try!(get_unchecked_pages(conn, filter));
     let statuses = check_pages(&pages);
     for (page, status) in pages.iter().zip(statuses.iter()) {
@@ -324,7 +317,7 @@ fn instantiate_page(row: postgres::rows::Row) -> Page {
 }
 
 fn update_page_unchanged(conn: &postgres::GenericConnection, page: &Page,
-                         dt: &UTCDateTime)
+                         dt: &UtcDateTime)
                          -> Result<(), postgres::error::Error> {
     let query = "
 update pages
@@ -336,7 +329,7 @@ where name = $2
 }
 
 fn update_page_changed(conn: &postgres::GenericConnection, page: &Page,
-                       dt: &UTCDateTime, new_etag: &Option<String>, new_hash: &Vec<u8>)
+                       dt: &UtcDateTime, new_etag: &Option<String>, new_hash: &Vec<u8>)
                        -> Result<(), postgres::error::Error> {
     let query = "
 update pages
@@ -354,7 +347,7 @@ where name = $5
 }
 
 fn update_page_error(conn: &postgres::GenericConnection, page: &Page,
-                     dt: &UTCDateTime, error: &String)
+                     dt: &UtcDateTime, error: &String)
                      -> Result<(), postgres::error::Error> {
     let query = "
 update pages
