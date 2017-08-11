@@ -65,7 +65,7 @@ fn handle_request(req: &mut fastcgi::Request,
     let pages = try!(get_pages(&trans, &filter));
     trans.set_commit();
 
-    let response = build_feed(&pages);
+    let response = try!(build_feed(&pages));
 
     let mut w = io::BufWriter::new(req.stdout());
     try!(w.write(b"Content-Type: application/rss+xml\n\n"));
@@ -94,6 +94,7 @@ enum PagefeedError {
     Hyper(hyper::Error),
     Regex(regex::Error),
     Rss(rss::Error),
+    RssBuilder(String),
 }
 
 impl From<io::Error> for PagefeedError {
@@ -128,30 +129,37 @@ impl From<rss::Error> for PagefeedError {
 
 // ----------------------------------------------------------------------------
 
-fn build_feed(pages: &Vec<Page>) -> rss::Channel {
-    let items = pages.iter().filter(|page| {
-        page.last_modified.is_some()
-    }).map(|page| {
-        rss::Item {
-            title: Some(page.name.to_owned()),
-            description: Some(describe_page_status(page)),
-            link: Some(page.url.to_owned()),
-            pub_date: Some(page.last_modified.unwrap().to_rfc2822()),
-            guid: Some(rss::Guid {
-                is_permalink: false,
-                value: format!("{}", page.item_id.unwrap().urn()),
-            }),
-            ..Default::default()
-        }
-    }).collect();
+fn build_feed(pages: &Vec<Page>) -> Result<rss::Channel, PagefeedError> {
+    let mut items = vec!();
 
-    rss::Channel {
-        title: String::from("Pagefeed"),
-        link: String::from("urn:x-pagefeed:nowhere"),
-        description: String::from("Pagefeed checks web pages for updates."),
-        items: items,
-        ..Default::default()
+    for page in pages.iter() {
+        if page.last_modified.is_some() {
+            let guid = try!(rss::GuidBuilder::default()
+                            .value(format!("{}", page.item_id.unwrap().urn()))
+                            .permalink(false)
+                            .build()
+                            .map_err(PagefeedError::RssBuilder));
+
+            let item = try!(rss::ItemBuilder::default()
+                            .title(page.name.to_owned())
+                            .description(describe_page_status(page))
+                            .link(page.url.to_owned())
+                            .pub_date(page.last_modified.unwrap().to_rfc2822())
+                            .guid(guid)
+                            .build()
+                            .map_err(PagefeedError::RssBuilder));
+
+            items.push(item);
+        }
     }
+
+    rss::ChannelBuilder::default()
+        .title("Pagefeed")
+        .link("urn:x-pagefeed:nowhere")
+        .description("Pagefeed checks web pages for updates.")
+        .items(items)
+        .build()
+        .map_err(PagefeedError::RssBuilder)
 }
 
 fn describe_page_status(page: &Page) -> String {
