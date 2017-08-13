@@ -139,10 +139,13 @@ fn build_feed(pages: &Vec<Page>) -> rss::Channel {
     let items = pages.iter().filter(|page| {
         page.last_modified.is_some()
     }).map(|page| {
+        let mut url = page.url.to_owned();
+        url = url.replace('&', "&amp;");
+
         rss::Item {
             title: Some(page.name.to_owned()),
             description: Some(describe_page_status(page)),
-            link: Some(page.url.to_owned()),
+            link: Some(url),
             pub_date: Some(page.last_modified.unwrap().to_rfc2822()),
             guid: Some(rss::Guid {
                 is_permalink: false,
