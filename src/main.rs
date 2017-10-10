@@ -1,8 +1,8 @@
 extern crate chrono;
 extern crate fastcgi;
-extern crate hyper;
 extern crate postgres;
 extern crate regex;
+extern crate reqwest;
 extern crate rss;
 extern crate scoped_threadpool;
 extern crate tiny_keccak;
@@ -91,8 +91,8 @@ fn get_pathinfo(req: &fastcgi::Request) -> String {
 enum PagefeedError {
     Io(io::Error),
     Postgres(postgres::error::Error),
-    Hyper(hyper::Error),
     Regex(regex::Error),
+    Reqwest(reqwest::Error),
     Rss(rss::Error),
     RssBuilder(String),
 }
@@ -109,15 +109,15 @@ impl From<postgres::error::Error> for PagefeedError {
     }
 }
 
-impl From<hyper::Error> for PagefeedError {
-    fn from(err: hyper::Error) -> PagefeedError {
-        PagefeedError::Hyper(err)
-    }
-}
-
 impl From<regex::Error> for PagefeedError {
     fn from(err: regex::Error) -> PagefeedError {
         PagefeedError::Regex(err)
+    }
+}
+
+impl From<reqwest::Error> for PagefeedError {
+    fn from(err: reqwest::Error) -> PagefeedError {
+        PagefeedError::Reqwest(err)
     }
 }
 
@@ -212,29 +212,29 @@ fn check_pages(pages: &Vec<Page>) -> Vec<PageStatus> {
 }
 
 fn check_page(page: &Page) -> PageStatus {
-    use hyper::client::{Client, RedirectPolicy};
-    use hyper::header;
-    use hyper::status::StatusCode;
+    use reqwest::header;
+    use reqwest::StatusCode;
     use std::str::FromStr;
 
     let mut headers = header::Headers::new();
-    headers.set(header::UserAgent("Mozilla/5.0".to_owned()));
+    headers.set(header::UserAgent::new("Mozilla/5.0"));
     if let Some(ref etag) = page.http_etag {
         if let Ok(etag) = header::EntityTag::from_str(etag) {
             headers.set(header::IfNoneMatch::Items(vec![etag]));
         }
     }
 
-    let mut client = Client::new();
-    client.set_redirect_policy(RedirectPolicy::FollowAll);
-
-    let status = client.get(&page.url).headers(headers).send()
+    let client = reqwest::Client::new();
+    let status = client.get(&page.url)
+        .headers(headers)
+        .send()
         .map_err(PagefeedError::from)
         .and_then(|mut response| {
-            if response.status == StatusCode::NotModified {
+            if response.status() == StatusCode::NotModified {
                 Ok(PageStatus::Unmodified)
             } else {
-                let etag = extract_etag(&response);
+                let etag = response.headers().get::<header::ETag>().map(
+                    |x| x.tag().to_string());
                 let hash = try!(hash(page, &mut response));
                 Ok(PageStatus::Modified { body_hash: hash, etag: etag })
             }
@@ -253,12 +253,6 @@ fn check_page(page: &Page) -> PageStatus {
 
         _ => status
     }
-}
-
-fn extract_etag(r: &hyper::client::response::Response) -> Option<String> {
-    r.headers.get().map(|&hyper::header::ETag(ref etag)| {
-        format!("{}", etag)
-    })
 }
 
 // ----------------------------------------------------------------------------
