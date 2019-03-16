@@ -32,20 +32,24 @@ struct Page {
 // ----------------------------------------------------------------------------
 
 fn main() {
-    let conn = postgres::Connection::connect(
-        database_url().as_ref(), postgres::TlsMode::None).unwrap();
+    database_connection();  // just to verify it works
 
     fastcgi::run(|mut req| {
         if Some("GET") != req.param("REQUEST_METHOD").as_ref().map(String::as_ref) {
             let _ = req.stdout().write(b"Status: 405 Method Not Allowed");
             return;
         }
-        handle_request(&mut req, &conn).unwrap_or_else(|err| {
+        handle_request(&mut req).unwrap_or_else(|err| {
             let msg = format!("{:?}", err);
             let _ = req.stderr().write(msg.as_bytes());
             panic!("{}", msg);
         })
     })
+}
+
+fn database_connection() -> postgres::Connection {
+    postgres::Connection::connect(
+        database_url().as_ref(), postgres::TlsMode::None).unwrap()
 }
 
 fn database_url() -> String {
@@ -55,11 +59,11 @@ fn database_url() -> String {
     })
 }
 
-fn handle_request(req: &mut fastcgi::Request,
-                  conn: &postgres::GenericConnection)
+fn handle_request(req: &mut fastcgi::Request)
                   -> Result<(), PagefeedError> {
     let filter = get_pathinfo(req).trim_matches('/').replace('/', ".");
 
+    let conn = database_connection();
     let trans = try!(conn.transaction());
     try!(process_unchecked_pages(&trans, &filter));
     let pages = try!(get_pages(&trans, &filter));
@@ -214,27 +218,23 @@ fn check_pages(pages: &Vec<Page>) -> Vec<PageStatus> {
 fn check_page(page: &Page) -> PageStatus {
     use reqwest::header;
     use reqwest::StatusCode;
-    use std::str::FromStr;
-
-    let mut headers = header::Headers::new();
-    headers.set(header::UserAgent::new("Mozilla/5.0"));
-    if let Some(ref etag) = page.http_etag {
-        if let Ok(etag) = header::EntityTag::from_str(etag) {
-            headers.set(header::IfNoneMatch::Items(vec![etag]));
-        }
-    }
 
     let client = reqwest::Client::new();
-    let status = client.get(&page.url)
-        .headers(headers)
-        .send()
+    let mut request = client.get(&page.url)
+        .header(header::USER_AGENT, "Mozilla/5.0");
+
+    if let Some(ref etag) = page.http_etag {
+        request = request.header(header::IF_NONE_MATCH, etag.to_string());
+    }
+
+    let status = request.send()
         .map_err(PagefeedError::from)
         .and_then(|mut response| {
-            if response.status() == StatusCode::NotModified {
+            if response.status() == StatusCode::NOT_MODIFIED {
                 Ok(PageStatus::Unmodified)
             } else {
-                let etag = response.headers().get::<header::ETag>().map(
-                    |x| x.tag().to_string());
+                let etag = response.headers().get(header::ETAG)
+                    .and_then(|x| x.to_str().ok()).map(str::to_string);
                 let hash = try!(hash(page, &mut response));
                 Ok(PageStatus::Modified { body_hash: hash, etag: etag })
             }
