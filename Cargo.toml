@@ -13,7 +13,7 @@ minidom = "^0.10.0"
 pg_interval = "0.2.0"
 postgres = { version = "^0.15", features = ["with-uuid", "with-chrono"] }
 regex = "^1.1.2"
-reqwest = "=0.9.5"
+reqwest = "^0.9.5"
 rss = "^1.1"
 tiny-keccak = "^1.4.2"
 uuid = { version = "^0.5", features = ["v4"] }
