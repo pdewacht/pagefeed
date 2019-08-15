@@ -9,8 +9,8 @@ publish = false
 chrono = "^0.4"
 fastcgi = "^1.0.0"
 htmlescape = "^0.3.1"
-minidom = "^0.10.0"
-pg_interval = "0.2.0"
+minidom = "^0.11.0"
+pg_interval = "^0.3.0"
 postgres = { version = "^0.15", features = ["with-uuid", "with-chrono"] }
 regex = "^1.1.2"
 reqwest = "^0.9.5"

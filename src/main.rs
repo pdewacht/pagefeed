@@ -226,6 +226,7 @@ fn build_opml(url: &str, pages: &Vec<Page>) -> minidom::Element {
                 .attr("type", "rss")
                 .attr("text", htmlescape::encode_minimal(&page.name))
                 .attr("xmlUrl", format!("{}/{}", url, page.slug))
+                .attr("htmlUrl", page.url.to_owned())
                 .build());
     }
     Element::builder("opml")
