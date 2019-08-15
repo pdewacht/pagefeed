@@ -109,19 +109,34 @@ fn handle_feed_request<W: Write>(slug: &str, out: &mut W) -> Result<(), Pagefeed
 
 fn get_url(req: &fastcgi::Request) -> Result<String, PagefeedError> {
     use std::io::{Error, ErrorKind};
-    let https = req.param("HTTPS").unwrap_or("".to_string());
+
+    let https = match req.param("HTTPS") {
+        Some(ref s) => s == "on",
+        _ => false,
+    };
+
     let server_addr = req.param("SERVER_ADDR")
         .ok_or(Error::new(ErrorKind::Other, "SERVER_ADDR unset"))?;
     let server_port = req.param("SERVER_PORT")
-        .ok_or(Error::new(ErrorKind::Other, "SERVER_PORT unset"))?;
-    let script_name = req.param("SCRIPT_NAME")
-        .ok_or(Error::new(ErrorKind::Other, "SCRIPT_NAME unset"))?;
+        .ok_or(Error::new(ErrorKind::Other, "SERVER_PORT unset"))?
+        .parse::<u16>()
+        .or(Err(Error::new(ErrorKind::Other, "SERVER_PORT invalid")))?;
 
-    Ok(format!("{}://{}:{}/{}",
-            if https == "on" { "https" } else { "http" },
-            server_addr,
-            server_port,
-            script_name))
+    let mut script_name = req.param("SCRIPT_NAME")
+        .ok_or(Error::new(ErrorKind::Other, "SCRIPT_NAME unset"))?;
+    if !script_name.starts_with('/') {
+        script_name.insert(0, '/')
+    }
+    if !script_name.ends_with('/') {
+        script_name.push('/')
+    }
+
+    Ok(match (https, server_port) {
+        (false, 80) => format!("http://{}{}", server_addr, script_name),
+        (false, _)  => format!("http://{}:{}{}", server_addr, server_port, script_name),
+        (true, 443) => format!("https://{}{}", server_addr, script_name),
+        (true, _)   => format!("https://{}:{}{}", server_addr, server_port, script_name),
+    })
 }
 
 fn get_pathinfo(req: &fastcgi::Request) -> String {
@@ -225,7 +240,7 @@ fn build_opml(url: &str, pages: &Vec<Page>) -> minidom::Element {
             Element::builder("outline")
                 .attr("type", "rss")
                 .attr("text", htmlescape::encode_minimal(&page.name))
-                .attr("xmlUrl", format!("{}/{}", url, page.slug))
+                .attr("xmlUrl", format!("{}{}", url, page.slug))
                 .attr("htmlUrl", page.url.to_owned())
                 .build());
     }
