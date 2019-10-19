@@ -260,7 +260,7 @@ enum PageStatus {
     FetchError (String)
 }
 
-fn refresh_page(conn: &postgres::GenericConnection, page: Page)
+fn refresh_page(conn: &dyn postgres::GenericConnection, page: Page)
                 -> Result<Page, postgres::error::Error> {
     if !page_needs_checking(&page) {
         return Ok(page);
@@ -326,7 +326,7 @@ fn check_page(page: &Page) -> PageStatus {
 
 // ----------------------------------------------------------------------------
 
-fn hash(page: &Page, r: &mut io::Read) -> Result<Vec<u8>, PagefeedError> {
+fn hash(page: &Page, r: &mut dyn io::Read) -> Result<Vec<u8>, PagefeedError> {
     let mut buf = Vec::new();
     try!(r.read_to_end(&mut buf));
 
@@ -344,7 +344,7 @@ fn hash(page: &Page, r: &mut io::Read) -> Result<Vec<u8>, PagefeedError> {
 
 // ----------------------------------------------------------------------------
 
-fn get_enabled_pages(conn: &postgres::GenericConnection)
+fn get_enabled_pages(conn: &dyn postgres::GenericConnection)
                      -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
 select *
@@ -357,7 +357,7 @@ where enabled
 }
 
 
-fn get_page(conn: &postgres::GenericConnection, slug: &str)
+fn get_page(conn: &dyn postgres::GenericConnection, slug: &str)
                  -> Result<Option<Page>, postgres::error::Error> {
     let query = "
 select *
@@ -393,7 +393,7 @@ fn to_duration(i: pg_interval::Interval) -> chrono::Duration {
         chrono::Duration::days(i.months as i64 * 30)
 }
 
-fn update_page_unchanged(conn: &postgres::GenericConnection, page: &Page)
+fn update_page_unchanged(conn: &dyn postgres::GenericConnection, page: &Page)
                          -> Result<Page, postgres::error::Error> {
     let query = "
 update pages
@@ -406,7 +406,7 @@ returning *
     })
 }
 
-fn update_page_changed(conn: &postgres::GenericConnection, page: &Page,
+fn update_page_changed(conn: &dyn postgres::GenericConnection, page: &Page,
                        new_etag: &Option<String>, new_hash: &Vec<u8>)
                        -> Result<Page, postgres::error::Error> {
     let query = "
@@ -426,7 +426,7 @@ returning *
     })
 }
 
-fn update_page_error(conn: &postgres::GenericConnection, page: &Page,
+fn update_page_error(conn: &dyn postgres::GenericConnection, page: &Page,
                      error: &String)
                      -> Result<Page, postgres::error::Error> {
     let query = "
