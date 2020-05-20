@@ -4,16 +4,21 @@ version = "0.3.4"
 authors = ["Peter De Wachter <pdewacht@gmail.com>"]
 license = "GPL-2.0+"
 publish = false
+edition = "2018"
 
 [dependencies]
 chrono = "^0.4"
 fastcgi = "^1.0.0"
 htmlescape = "^0.3.1"
 minidom = "^0.11.0"
-pg_interval = "^0.3.0"
-postgres = { version = "^0.15", features = ["with-uuid", "with-chrono"] }
+postgres = { version = "^0.17.3", features = ["with-uuid-0_8", "with-chrono-0_4"] }
 regex = "^1.1.2"
-reqwest = "^0.9.11"
+reqwest = { version = "^0.10.4", features = ["blocking"] }
 rss = "^1.1"
 tiny-keccak = "^1.4.2"
-uuid = { version = "^0.5", features = ["v4"] }
+uuid = { version = "^0.8", features = ["v4"] }
+
+[dependencies.pg_interval]
+git = "https://github.com/mpajkowski/rust-postgres-interval/"
+rev = "3586106513f552bbfd4a5fb64e2e203de9c6084e"
+

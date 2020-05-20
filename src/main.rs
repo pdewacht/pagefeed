@@ -50,9 +50,9 @@ fn main() {
     })
 }
 
-fn database_connection() -> Result<postgres::Connection, PagefeedError> {
-    let connection = postgres::Connection::connect(
-        database_url().as_ref(), postgres::TlsMode::None)?;
+fn database_connection() -> Result<postgres::Client, PagefeedError> {
+    let connection = postgres::Client::connect(
+        database_url().as_ref(), postgres::NoTls)?;
     Ok(connection)
 }
 
@@ -78,33 +78,34 @@ fn handle_request(req: &mut fastcgi::Request)
 }
 
 fn handle_opml_request<W: Write>(url: &str, out: &mut W) -> Result<(), PagefeedError> {
-    let conn = database_connection()?;
-    let pages = get_enabled_pages(&conn)?;
+    let mut conn = database_connection()?;
+    let mut trans = conn.transaction()?;
+    let pages = get_enabled_pages(&mut trans)?;
+    trans.commit()?;
     out.write(b"Content-Type: application/xml\n\n")?;
     build_opml(url, &pages).write_to(out)?;
     Ok(())
 }
 
 fn handle_feed_request<W: Write>(slug: &str, out: &mut W) -> Result<(), PagefeedError> {
-    let conn = database_connection()?;
-    let trans = conn.transaction()?;
+    let mut conn = database_connection()?;
+    let mut trans = conn.transaction()?;
+    let page = get_page(&mut trans, &slug)?;
+    let page = page.map(|page| refresh_page(&mut trans, page)).transpose()?;
+    trans.commit()?;
 
-    let page = match get_page(&trans, &slug)? {
-        Some(page) => page,
+    match page {
         None => {
             out.write(b"Status: 404 Not Found\n")?;
-            return Ok(());
+            Ok(())
+        },
+        Some(page) => {
+            let feed = build_feed(&page)?;
+            out.write(b"Content-Type: application/rss+xml\n\n")?;
+            feed.write_to(out)?;
+            Ok(())
         }
-    };
-
-    let page = refresh_page(&trans, page)?;
-
-    trans.set_commit();
-
-    let feed = build_feed(&page)?;
-    out.write(b"Content-Type: application/rss+xml\n\n")?;
-    feed.write_to(out)?;
-    Ok(())
+    }
 }
 
 fn get_url(req: &fastcgi::Request) -> Result<String, PagefeedError> {
@@ -200,7 +201,7 @@ fn build_feed(page: &Page) -> Result<rss::Channel, PagefeedError> {
 
     if page.last_modified.is_some() {
         let guid = rss::GuidBuilder::default()
-            .value(format!("{}", page.item_id.unwrap().urn()))
+            .value(format!("{}", page.item_id.unwrap().to_urn()))
             .permalink(false)
             .build()
             .map_err(PagefeedError::RssBuilder)?;
@@ -260,7 +261,7 @@ enum PageStatus {
     FetchError (String)
 }
 
-fn refresh_page(conn: &dyn postgres::GenericConnection, page: Page)
+fn refresh_page(conn: &mut postgres::Transaction, page: Page)
                 -> Result<Page, postgres::error::Error> {
     if !page_needs_checking(&page) {
         return Ok(page);
@@ -288,7 +289,7 @@ fn check_page(page: &Page) -> PageStatus {
     use reqwest::header;
     use reqwest::StatusCode;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::blocking::Client::new();
     let mut request = client.get(&page.url)
         .header(header::USER_AGENT, "Mozilla/5.0");
 
@@ -304,7 +305,7 @@ fn check_page(page: &Page) -> PageStatus {
             } else {
                 let etag = response.headers().get(header::ETAG)
                     .and_then(|x| x.to_str().ok()).map(str::to_string);
-                let hash = try!(hash(page, &mut response));
+                let hash = hash(page, &mut response)?;
                 Ok(PageStatus::Modified { body_hash: hash, etag: etag })
             }
         }).unwrap_or_else(|err| {
@@ -328,10 +329,10 @@ fn check_page(page: &Page) -> PageStatus {
 
 fn hash(page: &Page, r: &mut dyn io::Read) -> Result<Vec<u8>, PagefeedError> {
     let mut buf = Vec::new();
-    try!(r.read_to_end(&mut buf));
+    r.read_to_end(&mut buf)?;
 
     if let Some(delete_regex) = page.delete_regex.as_ref() {
-        let re = try!(regex::bytes::Regex::new(delete_regex));
+        let re = regex::bytes::Regex::new(delete_regex)?;
         buf = re.replace_all(&buf, &b""[..]).into_owned();
     }
 
@@ -344,7 +345,7 @@ fn hash(page: &Page, r: &mut dyn io::Read) -> Result<Vec<u8>, PagefeedError> {
 
 // ----------------------------------------------------------------------------
 
-fn get_enabled_pages(conn: &dyn postgres::GenericConnection)
+fn get_enabled_pages(conn: &mut postgres::Transaction)
                      -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
 select *
@@ -357,8 +358,8 @@ where enabled
 }
 
 
-fn get_page(conn: &dyn postgres::GenericConnection, slug: &str)
-                 -> Result<Option<Page>, postgres::error::Error> {
+fn get_page(conn: &mut postgres::Transaction, slug: &str)
+            -> Result<Option<Page>, postgres::error::Error> {
     let query = "
 select *
 from pages
@@ -369,7 +370,7 @@ where slug = $1
     })
 }
 
-fn instantiate_page(row: postgres::rows::Row) -> Page {
+fn instantiate_page(row: &postgres::row::Row) -> Page {
     Page {
         slug: row.get("slug"),
         name: row.get("name"),
@@ -393,7 +394,7 @@ fn to_duration(i: pg_interval::Interval) -> chrono::Duration {
         chrono::Duration::days(i.months as i64 * 30)
 }
 
-fn update_page_unchanged(conn: &dyn postgres::GenericConnection, page: &Page)
+fn update_page_unchanged(conn: &mut postgres::Transaction, page: &Page)
                          -> Result<Page, postgres::error::Error> {
     let query = "
 update pages
@@ -406,7 +407,7 @@ returning *
     })
 }
 
-fn update_page_changed(conn: &dyn postgres::GenericConnection, page: &Page,
+fn update_page_changed(conn: &mut postgres::Transaction, page: &Page,
                        new_etag: &Option<String>, new_hash: &Vec<u8>)
                        -> Result<Page, postgres::error::Error> {
     let query = "
@@ -426,8 +427,7 @@ returning *
     })
 }
 
-fn update_page_error(conn: &dyn postgres::GenericConnection, page: &Page,
-                     error: &String)
+fn update_page_error(conn: &mut postgres::Transaction, page: &Page, error: &String)
                      -> Result<Page, postgres::error::Error> {
     let query = "
 update pages
