@@ -336,7 +336,8 @@ fn hash(page: &Page, r: &mut dyn io::Read) -> Result<Vec<u8>, PagefeedError> {
         buf = re.replace_all(&buf, &b""[..]).into_owned();
     }
 
-    let mut sha3 = tiny_keccak::Keccak::new_sha3_256();
+    use tiny_keccak::{Hasher, Sha3};
+    let mut sha3 = Sha3::v256();
     sha3.update(&buf);
     let mut res: [u8; 32] = [0; 32];
     sha3.finalize(&mut res);
