@@ -2,7 +2,6 @@ extern crate chrono;
 extern crate fastcgi;
 extern crate htmlescape;
 extern crate minidom;
-extern crate pg_interval;
 extern crate postgres;
 extern crate regex;
 extern crate reqwest;
@@ -19,8 +18,7 @@ struct Page {
     slug: String,
     name: String,
     url: String,
-    check_interval: chrono::Duration,
-    cooldown: chrono::Duration,
+    next_check: UtcDateTime,
     //enabled: bool,
 
     last_checked: Option<UtcDateTime>,
@@ -279,10 +277,7 @@ fn refresh_page(conn: &mut postgres::Transaction, page: Page)
 }
 
 fn page_needs_checking(page: &Page) -> bool {
-    page.last_checked.is_none() ||
-        chrono::Utc::now() >= std::cmp::max(
-            page.last_checked.unwrap() + page.check_interval,
-            page.last_modified.unwrap() + page.cooldown)
+    chrono::Utc::now() >= page.next_check
 }
 
 fn check_page(page: &Page) -> PageStatus {
@@ -362,7 +357,12 @@ where enabled
 fn get_page(conn: &mut postgres::Transaction, slug: &str)
             -> Result<Option<Page>, postgres::error::Error> {
     let query = "
-select *
+select *,
+  greatest(
+     last_checked + check_interval,
+     last_modified + cooldown,
+     to_timestamp(0)
+  ) as next_check
 from pages
 where slug = $1
 ";
@@ -378,8 +378,7 @@ fn instantiate_page(row: &postgres::row::Row) -> Page {
         url: row.get("url"),
         //enabled: row.get("enabled"),
         delete_regex: row.get("delete_regex"),
-        check_interval: to_duration(row.get("check_interval")),
-        cooldown: to_duration(row.get("cooldown")),
+        next_check: row.get("next_check"),
         last_checked: row.get("last_checked"),
         last_modified: row.get("last_modified"),
         last_error: row.get("last_error"),
@@ -387,12 +386,6 @@ fn instantiate_page(row: &postgres::row::Row) -> Page {
         http_etag: row.get("http_etag"),
         http_body_hash: row.get("http_body_hash"),
     }
-}
-
-fn to_duration(i: pg_interval::Interval) -> chrono::Duration {
-    chrono::Duration::microseconds(i.microseconds) +
-        chrono::Duration::days(i.days as i64) +
-        chrono::Duration::days(i.months as i64 * 30)
 }
 
 fn update_page_unchanged(conn: &mut postgres::Transaction, page: &Page)
