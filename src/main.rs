@@ -21,7 +21,7 @@ struct Page {
     next_check: UtcDateTime,
     //enabled: bool,
 
-    last_checked: Option<UtcDateTime>,
+    //last_checked: Option<UtcDateTime>,
     last_modified: Option<UtcDateTime>,
     last_error: Option<String>,
     item_id: Option<uuid::Uuid>,
@@ -37,13 +37,13 @@ struct Page {
 fn main() {
     fastcgi::run(|mut req| {
         if Some("GET") != req.param("REQUEST_METHOD").as_ref().map(String::as_ref) {
-            let _ = req.stdout().write(b"Status: 405 Method Not Allowed\n");
+            let _ = req.stdout().write_all(b"Status: 405 Method Not Allowed\n\n");
             return;
         }
         handle_request(&mut req).unwrap_or_else(|err| {
             let msg = format!("{:?}", err);
-            let _ = req.stderr().write(msg.as_bytes());
-            panic!("{}", msg);
+            let _ = req.stdout().write_all(b"Status: 500 Internal Server Error\n\n");
+            let _ = req.stderr().write_all(msg.as_bytes());
         })
     })
 }
@@ -80,7 +80,7 @@ fn handle_opml_request<W: Write>(url: &str, out: &mut W) -> Result<(), PagefeedE
     let mut trans = conn.transaction()?;
     let pages = get_enabled_pages(&mut trans)?;
     trans.commit()?;
-    out.write(b"Content-Type: application/xml\n\n")?;
+    out.write_all(b"Content-Type: application/xml\n\n")?;
     build_opml(url, &pages).write_to(out)?;
     Ok(())
 }
@@ -94,12 +94,12 @@ fn handle_feed_request<W: Write>(slug: &str, out: &mut W) -> Result<(), Pagefeed
 
     match page {
         None => {
-            out.write(b"Status: 404 Not Found\n")?;
+            out.write_all(b"Status: 404 Not Found\n\n")?;
             Ok(())
         },
         Some(page) => {
             let feed = build_feed(&page)?;
-            out.write(b"Content-Type: application/rss+xml\n\n")?;
+            out.write_all(b"Content-Type: application/rss+xml\n\n")?;
             feed.write_to(out)?;
             Ok(())
         }
@@ -268,12 +268,13 @@ fn refresh_page(conn: &mut postgres::Transaction, page: Page)
     let status = check_page(&page);
     match status {
         PageStatus::Unmodified =>
-            update_page_unchanged(conn, &page),
+            update_page_unchanged(conn, &page)?,
         PageStatus::Modified { ref body_hash, ref etag } =>
-            update_page_changed(conn, &page, etag, body_hash),
+            update_page_changed(conn, &page, etag, body_hash)?,
         PageStatus::FetchError(ref error) =>
-            update_page_error(conn, &page, error),
+            update_page_error(conn, &page, error)?,
     }
+    get_page(conn, &page.slug).transpose().expect("page disappeared??")
 }
 
 fn page_needs_checking(page: &Page) -> bool {
@@ -379,7 +380,7 @@ fn instantiate_page(row: &postgres::row::Row) -> Page {
         //enabled: row.get("enabled"),
         delete_regex: row.get("delete_regex"),
         next_check: row.get("next_check"),
-        last_checked: row.get("last_checked"),
+        //last_checked: row.get("last_checked"),
         last_modified: row.get("last_modified"),
         last_error: row.get("last_error"),
         item_id: row.get("item_id"),
@@ -389,21 +390,19 @@ fn instantiate_page(row: &postgres::row::Row) -> Page {
 }
 
 fn update_page_unchanged(conn: &mut postgres::Transaction, page: &Page)
-                         -> Result<Page, postgres::error::Error> {
+                         -> Result<(), postgres::error::Error> {
     let query = "
 update pages
 set last_checked = current_timestamp
 where slug = $1
-returning *
 ";
-    conn.query(query, &[&page.slug]).map(|rows| {
-        rows.iter().nth(0).map(instantiate_page).unwrap()
-    })
+    conn.execute(query, &[&page.slug])?;
+    Ok(())
 }
 
 fn update_page_changed(conn: &mut postgres::Transaction, page: &Page,
                        new_etag: &Option<String>, new_hash: &Vec<u8>)
-                       -> Result<Page, postgres::error::Error> {
+                       -> Result<(), postgres::error::Error> {
     let query = "
 update pages
 set last_checked = current_timestamp,
@@ -413,16 +412,14 @@ set last_checked = current_timestamp,
     http_etag = $2,
     http_body_hash = $3
 where slug = $4
-returning *
 ";
     let uuid = uuid::Uuid::new_v4();
-    conn.query(query, &[&uuid, new_etag, new_hash, &page.slug]).map(|rows| {
-        rows.iter().nth(0).map(instantiate_page).unwrap()
-    })
+    conn.execute(query, &[&uuid, new_etag, new_hash, &page.slug])?;
+    Ok(())
 }
 
 fn update_page_error(conn: &mut postgres::Transaction, page: &Page, error: &String)
-                     -> Result<Page, postgres::error::Error> {
+                     -> Result<(), postgres::error::Error> {
     let query = "
 update pages
 set last_checked = current_timestamp,
@@ -432,12 +429,10 @@ set last_checked = current_timestamp,
     http_etag = null,
     http_body_hash = null
 where slug = $3
-returning *
 ";
     let uuid = uuid::Uuid::new_v4();
-    conn.query(query, &[error, &uuid, &page.slug]).map(|rows| {
-        rows.iter().nth(0).map(instantiate_page).unwrap()
-    })
+    conn.execute(query, &[error, &uuid, &page.slug])?;
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
