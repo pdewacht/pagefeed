@@ -1,11 +1,12 @@
 extern crate chrono;
 extern crate fastcgi;
 extern crate htmlescape;
-extern crate minidom;
 extern crate postgres;
+extern crate quick_xml;
 extern crate regex;
 extern crate reqwest;
 extern crate rss;
+extern crate serde;
 extern crate tiny_keccak;
 extern crate uuid;
 
@@ -83,7 +84,7 @@ fn handle_opml_request<W: Write>(url: &str, out: &mut W) -> Result<(), PagefeedE
     let pages = get_enabled_pages(&mut trans)?;
     trans.commit()?;
     out.write_all(b"Content-Type: application/xml\n\n")?;
-    build_opml(url, &pages).write_to(out)?;
+    build_opml(url, &pages, out)?;
     Ok(())
 }
 
@@ -155,11 +156,11 @@ fn get_pathinfo(req: &fastcgi::Request) -> String {
 enum PagefeedError {
     Io(io::Error),
     Postgres(postgres::error::Error),
+    QuickXml(quick_xml::de::DeError),
     Regex(regex::Error),
     Reqwest(reqwest::Error),
     Rss(rss::Error),
     RssBuilder(String),
-    Minidom(minidom::Error),
 }
 
 impl From<io::Error> for PagefeedError {
@@ -192,9 +193,9 @@ impl From<rss::Error> for PagefeedError {
     }
 }
 
-impl From<minidom::Error> for PagefeedError {
-    fn from(err: minidom::Error) -> PagefeedError {
-        PagefeedError::Minidom(err)
+impl From<quick_xml::de::DeError> for PagefeedError {
+    fn from(err: quick_xml::de::DeError) -> PagefeedError {
+        PagefeedError::QuickXml(err)
     }
 }
 
@@ -237,25 +238,53 @@ fn describe_page_status(page: &Page) -> String {
     )
 }
 
-fn build_opml(url: &str, pages: &Vec<Page>) -> minidom::Element {
-    use minidom::Element;
-    let head = Element::bare("head");
-    let mut body = Element::bare("body");
-    for page in pages {
-        body.append_child(
-            Element::builder("outline")
-                .attr("type", "rss")
-                .attr("text", htmlescape::encode_minimal(&page.name))
-                .attr("xmlUrl", format!("{}{}", url, page.slug))
-                .attr("htmlUrl", page.url.to_owned())
-                .build(),
-        );
+fn build_opml<W: Write>(url: &str, pages: &Vec<Page>, out: &mut W) -> Result<(), PagefeedError> {
+    #[derive(serde::Serialize)]
+    #[serde(rename = "opml")]
+    struct OPML<'a> {
+        version: &'a str,
+        head: Head,
+        body: Body<'a>,
     }
-    Element::builder("opml")
-        .attr("version", "2.0")
-        .append(head)
-        .append(body)
-        .build()
+
+    #[derive(serde::Serialize)]
+    struct Head {}
+
+    #[derive(serde::Serialize)]
+    struct Body<'a> {
+        outline: Vec<Outline<'a>>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct Outline<'a> {
+        #[serde(rename = "type")]
+        typ: &'a str,
+        text: String,
+        #[serde(rename = "xmlUrl")]
+        xml_url: String,
+        #[serde(rename = "htmlUrl")]
+        html_url: &'a str,
+    }
+
+    quick_xml::se::to_writer(
+        out,
+        &OPML {
+            version: "2.0",
+            head: Head {},
+            body: Body {
+                outline: pages
+                    .iter()
+                    .map(|page| Outline {
+                        typ: "rss",
+                        text: htmlescape::encode_minimal(&page.name),
+                        xml_url: format!("{}{}", url, page.slug),
+                        html_url: &page.url,
+                    })
+                    .collect(),
+            },
+        },
+    )?;
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
