@@ -399,7 +399,12 @@ fn get_enabled_pages(
     conn: &mut postgres::Transaction,
 ) -> Result<Vec<Page>, postgres::error::Error> {
     let query = "
-select *
+select *,
+  greatest(
+     last_checked + check_interval,
+     last_modified + cooldown,
+     to_timestamp(0)
+  ) as next_check
 from pages
 where enabled
 ";
@@ -419,7 +424,7 @@ select *,
      to_timestamp(0)
   ) as next_check
 from pages
-where slug = $1
+where enabled and slug = $1
 ";
     conn.query(query, &[&slug])
         .map(|rows| rows.iter().nth(0).map(instantiate_page))
