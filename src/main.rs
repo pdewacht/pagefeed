@@ -71,7 +71,7 @@ fn handle_request(req: &mut fastcgi::Request) -> Result<(), PagefeedError> {
     let slug = pathinfo.trim_matches('/');
 
     let mut w = io::BufWriter::new(req.stdout());
-    if slug == "" {
+    if slug.is_empty() {
         handle_opml_request(&url, &mut w)
     } else {
         handle_feed_request(slug, &mut w)
@@ -91,7 +91,7 @@ fn handle_opml_request<W: Write>(url: &str, out: &mut W) -> Result<(), PagefeedE
 fn handle_feed_request<W: Write>(slug: &str, out: &mut W) -> Result<(), PagefeedError> {
     let mut conn = database_connection()?;
     let mut trans = conn.transaction()?;
-    let page = get_page(&mut trans, &slug)?;
+    let page = get_page(&mut trans, slug)?;
     let page = page
         .map(|page| refresh_page(&mut trans, page))
         .transpose()?;
@@ -103,7 +103,7 @@ fn handle_feed_request<W: Write>(slug: &str, out: &mut W) -> Result<(), Pagefeed
             Ok(())
         }
         Some(page) => {
-            let feed = build_feed(&page)?;
+            let feed = build_feed(&page);
             out.write_all(b"Content-Type: application/rss+xml\n\n")?;
             feed.write_to(out)?;
             Ok(())
@@ -121,16 +121,16 @@ fn get_url(req: &fastcgi::Request) -> Result<String, PagefeedError> {
 
     let server_addr = req
         .param("SERVER_ADDR")
-        .ok_or(Error::new(ErrorKind::Other, "SERVER_ADDR unset"))?;
+        .ok_or_else(|| Error::new(ErrorKind::Other, "SERVER_ADDR unset"))?;
     let server_port = req
         .param("SERVER_PORT")
-        .ok_or(Error::new(ErrorKind::Other, "SERVER_PORT unset"))?
+        .ok_or_else(|| Error::new(ErrorKind::Other, "SERVER_PORT unset"))?
         .parse::<u16>()
-        .or(Err(Error::new(ErrorKind::Other, "SERVER_PORT invalid")))?;
+        .map_err(|_| Error::new(ErrorKind::Other, "SERVER_PORT invalid"))?;
 
     let mut script_name = req
         .param("SCRIPT_NAME")
-        .ok_or(Error::new(ErrorKind::Other, "SCRIPT_NAME unset"))?;
+        .ok_or_else(|| Error::new(ErrorKind::Other, "SCRIPT_NAME unset"))?;
     if !script_name.starts_with('/') {
         script_name.insert(0, '/')
     }
@@ -147,7 +147,7 @@ fn get_url(req: &fastcgi::Request) -> Result<String, PagefeedError> {
 }
 
 fn get_pathinfo(req: &fastcgi::Request) -> String {
-    req.param("PATH_INFO").unwrap_or("".to_string())
+    req.param("PATH_INFO").unwrap_or_default()
 }
 
 // ----------------------------------------------------------------------------
@@ -160,7 +160,6 @@ enum PagefeedError {
     Regex(regex::Error),
     Reqwest(reqwest::Error),
     Rss(rss::Error),
-    RssBuilder(String),
 }
 
 impl From<io::Error> for PagefeedError {
@@ -201,15 +200,14 @@ impl From<quick_xml::de::DeError> for PagefeedError {
 
 // ----------------------------------------------------------------------------
 
-fn build_feed(page: &Page) -> Result<rss::Channel, PagefeedError> {
+fn build_feed(page: &Page) -> rss::Channel {
     let mut items = vec![];
 
     if page.last_modified.is_some() {
         let guid = rss::GuidBuilder::default()
-            .value(format!("{}", page.item_id.unwrap().to_urn()))
+            .value(format!("{}", page.item_id.unwrap().urn()))
             .permalink(false)
-            .build()
-            .map_err(PagefeedError::RssBuilder)?;
+            .build();
 
         let item = rss::ItemBuilder::default()
             .title(page.name.to_owned())
@@ -217,8 +215,7 @@ fn build_feed(page: &Page) -> Result<rss::Channel, PagefeedError> {
             .link(page.url.to_owned())
             .pub_date(page.last_modified.unwrap().to_rfc2822())
             .guid(guid)
-            .build()
-            .map_err(PagefeedError::RssBuilder)?;
+            .build();
 
         items.push(item);
     }
@@ -228,7 +225,6 @@ fn build_feed(page: &Page) -> Result<rss::Channel, PagefeedError> {
         .link(page.url.to_owned())
         .items(items)
         .build()
-        .map_err(PagefeedError::RssBuilder)
 }
 
 fn describe_page_status(page: &Page) -> String {
@@ -238,10 +234,10 @@ fn describe_page_status(page: &Page) -> String {
     )
 }
 
-fn build_opml<W: Write>(url: &str, pages: &Vec<Page>, out: &mut W) -> Result<(), PagefeedError> {
+fn build_opml<W: Write>(url: &str, pages: &[Page], out: &mut W) -> Result<(), PagefeedError> {
     #[derive(serde::Serialize)]
     #[serde(rename = "opml")]
-    struct OPML<'a> {
+    struct Opml<'a> {
         version: &'a str,
         head: Head,
         body: Body<'a>,
@@ -266,9 +262,8 @@ fn build_opml<W: Write>(url: &str, pages: &Vec<Page>, out: &mut W) -> Result<(),
         html_url: &'a str,
     }
 
-    quick_xml::se::to_writer(
-        out,
-        &OPML {
+    write!(out, "{}", quick_xml::se::to_string(
+        &Opml {
             version: "2.0",
             head: Head {},
             body: Body {
@@ -283,7 +278,7 @@ fn build_opml<W: Write>(url: &str, pages: &Vec<Page>, out: &mut W) -> Result<(),
                     .collect(),
             },
         },
-    )?;
+    )?)?;
     Ok(())
 }
 
@@ -350,11 +345,8 @@ fn check_page(page: &Page) -> PageStatus {
                     .get(header::ETAG)
                     .and_then(|x| x.to_str().ok())
                     .map(str::to_string);
-                let hash = hash(page, &mut response)?;
-                Ok(PageStatus::Modified {
-                    body_hash: hash,
-                    etag: etag,
-                })
+                let body_hash = hash(page, &mut response)?;
+                Ok(PageStatus::Modified { body_hash, etag })
             }
         })
         .unwrap_or_else(|err| PageStatus::FetchError(format!("{:?}", err)));
@@ -427,7 +419,7 @@ from pages
 where enabled and slug = $1
 ";
     conn.query(query, &[&slug])
-        .map(|rows| rows.iter().nth(0).map(instantiate_page))
+        .map(|rows| rows.get(0).map(instantiate_page))
 }
 
 fn instantiate_page(row: &postgres::row::Row) -> Page {
