@@ -11,7 +11,7 @@ chrono = "^0.4"
 fastcgi = "^1.0.0"
 htmlescape = "^0.3.1"
 postgres = { version = "^0.19.1", features = ["with-uuid-1", "with-chrono-0_4"] }
-quick-xml = { version = "^0.28.2", features = ["serialize"] }
+quick-xml = { version = "^0.30.0", features = ["serialize"] }
 regex = "^1.1.2"
 reqwest = { version = "^0.11.3", default-features = false, features = ["blocking", "rustls-tls"] }
 rss = "^2.0"
