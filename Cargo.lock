@@ -1380,6 +1380,7 @@ dependencies = [
  "ego-tree",
  "getopts",
  "html5ever",
+ "indexmap 2.0.2",
  "once_cell",
  "selectors",
  "smallvec",
