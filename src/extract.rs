@@ -49,13 +49,16 @@ fn extract_multihtml(pc: &PageConfig, document: String) -> Result<Vec<Item>, Err
     let default_item_sel = "body";
     let default_title_sel = "h1,h2,h3,h4,h5,h6";
     let default_text_sel = ":root";
+    let default_url_sel = ":root";
 
-    let item_sel = Selector::parse(pc.item_selector.as_deref().unwrap_or(&default_item_sel))
+    let item_sel = Selector::parse(pc.item_selector.as_deref().unwrap_or(default_item_sel))
         .expect("invalid item_selector");
-    let title_sel = Selector::parse(pc.title_selector.as_deref().unwrap_or(&default_title_sel))
+    let title_sel = Selector::parse(pc.title_selector.as_deref().unwrap_or(default_title_sel))
         .expect("invalid title_selector");
-    let text_sel = Selector::parse(pc.text_selector.as_deref().unwrap_or(&default_text_sel))
+    let text_sel = Selector::parse(pc.text_selector.as_deref().unwrap_or(default_text_sel))
         .expect("invalid text_selector");
+    let url_sel = Selector::parse(pc.url_selector.as_deref().unwrap_or(default_url_sel))
+        .expect("invalid url_selector");
 
     let document = Html::parse_document(&document);
     let mut result = vec![];
@@ -71,11 +74,11 @@ fn extract_multihtml(pc: &PageConfig, document: String) -> Result<Vec<Item>, Err
                 .unwrap_or(item_el)
                 .inner_html(),
         );
-        result.push(Item {
-            title,
-            body,
-            url: None,
-        })
+        let url_el = item_el.select(&url_sel).next().unwrap_or(item_el);
+        let url_el_href = url_el.value().attr("href");
+        let url_el_src = url_el.value().attr("src");
+        let url = url_el_href.or(url_el_src).map(str::to_string);
+        result.push(Item { title, body, url })
     }
     Ok(result)
 }
@@ -85,8 +88,8 @@ fn extract_json(pc: &PageConfig, document: String) -> Result<Vec<Item>, Error> {
     use serde_json::Value;
 
     let jaq_program: &str = match &pc.jaq {
-        Some(filter) => &filter,
-        None => &r#"{"text": tostring}"#,
+        Some(filter) => filter,
+        None => r#"{"text": tostring}"#,
     };
     let filter = compile_jaq(jaq_program)?;
 

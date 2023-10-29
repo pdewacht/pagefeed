@@ -37,7 +37,7 @@ pub struct PageConfig {
     item_selector: Option<String>,
     text_selector: Option<String>,
     title_selector: Option<String>,
-    //url_selector: Option<String>,
+    url_selector: Option<String>,
 
     // JSON options
     jaq: Option<String>,
