@@ -265,6 +265,21 @@ fn build_rss(page: &PageConfig, state: &PageState) -> rss::Channel {
                 .build(),
         )
     }
+    if state.items.is_empty() {
+        items.push(
+            rss::ItemBuilder::default()
+                .title(page.name.clone())
+                .link(page.url.clone())
+                .description("No items found!".to_string())
+                .guid(
+                    rss::GuidBuilder::default()
+                        .value(format!("empty:{}", page.name))
+                        .permalink(false)
+                        .build(),
+                )
+                .build(),
+        )
+    }
 
     rss::ChannelBuilder::default()
         .title(page.name.clone())

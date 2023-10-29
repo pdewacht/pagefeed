@@ -132,6 +132,7 @@ fn get_string_from_map(
 
 fn compile_jaq(filter: &str) -> Result<jaq_interpret::Filter, Error> {
     let mut defs = jaq_interpret::ParseCtx::new(Vec::new());
+    defs.insert_natives(jaq_core::core());
     defs.insert_defs(jaq_std::std());
 
     let (f, errs) = jaq_parse::parse(filter, jaq_parse::main());
@@ -141,6 +142,9 @@ fn compile_jaq(filter: &str) -> Result<jaq_interpret::Filter, Error> {
 
     let f = defs.compile(f.unwrap());
     if !defs.errs.is_empty() {
+        for err in &defs.errs {
+            println!("error: {}", err.0);
+        }
         panic!("Failed to parse: {}", filter);
     }
 
