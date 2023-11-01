@@ -197,11 +197,11 @@ async fn fetch_page(client: &reqwest::Client, page: &PageConfig, state: PageStat
 
     let response = match request.send().await {
         Err(error) => return state.failure(now, format!("{:?}", error)),
-        Ok(response) if !response.status().is_success() => {
-            return state.failure(now, format!("HTTP status {}", response.status()))
-        }
         Ok(response) if response.status() == reqwest::StatusCode::NOT_MODIFIED => {
             return state.not_modified(now)
+        }
+        Ok(response) if !response.status().is_success() => {
+            return state.failure(now, format!("HTTP status {}", response.status()))
         }
         Ok(response) => response,
     };
