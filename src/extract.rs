@@ -1,5 +1,4 @@
 use crate::{Item, ItemBody, Mode, PageConfig};
-use std::rc::Rc;
 
 type Error = Box<dyn std::error::Error>;
 
@@ -84,29 +83,27 @@ fn extract_multihtml(pc: &PageConfig, document: String) -> Result<Vec<Item>, Err
 }
 
 fn extract_json(pc: &PageConfig, document: String) -> Result<Vec<Item>, Error> {
-    use jaq_interpret::{Ctx, Error, FilterT, RcIter, Val};
+    use jaq_json::Val;
     use serde_json::Value;
 
-    let jaq_program: &str = match &pc.jaq {
+    let text_key = Val::from("text".to_string());
+    let title_key = Val::from("title".to_string());
+    let url_key = Val::from("url".to_string());
+
+    let jaq_source: &str = match &pc.jaq {
         Some(filter) => filter,
         None => r#"{"text": tostring}"#,
     };
-    let filter = compile_jaq(jaq_program)?;
-
-    let text_key = Rc::new("text".to_string());
-    let title_key = Rc::new("title".to_string());
-    let url_key = Rc::new("url".to_string());
 
     let json: Value = serde_json::from_str(&document)?;
-    let mut result = vec![];
 
-    let inputs = RcIter::new(core::iter::empty());
-    for item in filter.run((Ctx::new([], &inputs), Val::from(json))) {
-        let item = item?;
-        let text = get_string_from_map(&item, &text_key)?
-            .ok_or_else(|| Error::Index(item.clone(), Val::str(text_key.to_string())))?;
-        let title = get_string_from_map(&item, &title_key)?;
-        let url = get_string_from_map(&item, &url_key)?;
+    let mut result = vec![];
+    for item in run_jaq(jaq_source, json)? {
+        let item = item.map_err(|e| e.to_string())?;
+
+        let text = get_string_from_map(&item, &text_key).ok_or("text key missing")?;
+        let title = get_string_from_map(&item, &title_key);
+        let url = get_string_from_map(&item, &url_key);
 
         result.push(Item {
             body: ItemBody::Html(text),
@@ -118,38 +115,37 @@ fn extract_json(pc: &PageConfig, document: String) -> Result<Vec<Item>, Error> {
     Ok(result)
 }
 
-fn get_string_from_map(
-    obj: &jaq_interpret::Val,
-    key: &Rc<String>,
-) -> Result<Option<String>, jaq_interpret::Error> {
-    use jaq_interpret::{Error, Val};
-
-    let Val::Obj(map) = obj else {
-        return Err(Error::Index(obj.clone(), Val::str(key.to_string())));
-    };
-    match (*map).get(key) {
-        None => Ok(None),
-        Some(value) => Ok(Some(value.clone().to_str()?.to_string())),
-    }
+fn get_string_from_map(obj: &jaq_json::Val, key: &jaq_json::Val) -> Option<String> {
+    use jaq_core::ValT;
+    Some(obj.clone().index(key).ok()?.as_str()?.to_string())
 }
 
-fn compile_jaq(filter: &str) -> Result<jaq_interpret::Filter, Error> {
-    let mut defs = jaq_interpret::ParseCtx::new(Vec::new());
-    defs.insert_natives(jaq_core::core());
-    defs.insert_defs(jaq_std::std());
+fn run_jaq(
+    source: &str,
+    input: serde_json::Value,
+) -> Result<Vec<jaq_core::ValR<jaq_json::Val>>, Error> {
+    use jaq_core::load::{Arena, File, Loader};
+    use jaq_core::{Compiler, Ctx, RcIter};
+    use jaq_json::Val;
 
-    let (f, errs) = jaq_parse::parse(filter, jaq_parse::main());
-    if !errs.is_empty() {
-        panic!("Failed to parse: {}", filter);
-    }
+    let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+    let arena = Arena::default();
+    let modules = loader
+        .load(
+            &arena,
+            File {
+                code: source,
+                path: (),
+            },
+        )
+        .unwrap();
 
-    let f = defs.compile(f.unwrap());
-    if !defs.errs.is_empty() {
-        for err in &defs.errs {
-            println!("error: {}", err.0);
-        }
-        panic!("Failed to parse: {}", filter);
-    }
+    let filter = Compiler::default()
+        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+        .compile(modules)
+        .unwrap();
 
-    Ok(f)
+    let inputs = RcIter::new(core::iter::empty());
+    let out = filter.run((Ctx::new([], &inputs), Val::from(input)));
+    Ok(out.take(100).collect())
 }
