@@ -15,12 +15,12 @@ rss = "2.0"
 maud = "0.27"
 uuid = { version = "1.1.2", features = ["v5"] }
 
-toml = "0.8.2"
+toml = "0.9.8"
 serde = { version ="1.0", features = ["derive"] }
 time = { version = "0.3", features = ["serde-human-readable", "serde-well-known"] }
 humantime-serde = "1.1.1"
 
-scraper = { version = "0.23.1", features = ["deterministic"] }
+scraper = { version = "0.24.0", features = ["deterministic"] }
 
 serde_json = "1.0.97"
 jaq-core = "1.0.0"
