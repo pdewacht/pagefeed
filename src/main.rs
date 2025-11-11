@@ -2,7 +2,7 @@ use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use maud::html;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ struct Config {
     state_file: PathBuf,
 
     #[serde(flatten)]
-    pages: HashMap<String, PageConfig>,
+    pages: BTreeMap<String, PageConfig>,
 }
 
 #[derive(Deserialize)]
@@ -137,7 +137,7 @@ impl PageState {
 }
 
 async fn update_pages(
-    configs: &HashMap<String, PageConfig>,
+    configs: &BTreeMap<String, PageConfig>,
     mut states: HashMap<String, PageState>,
 ) -> HashMap<String, PageState> {
     let client = reqwest::Client::builder()
