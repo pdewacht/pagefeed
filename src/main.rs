@@ -1,5 +1,5 @@
-use futures::stream::futures_unordered::FuturesUnordered;
-use futures::StreamExt;
+use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::StreamExt;
 use maud::html;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
