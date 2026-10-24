@@ -20,7 +20,7 @@ serde = { version = "1.0", features = ["derive"] }
 time = { version = "0.3", features = ["serde-human-readable", "serde-well-known"] }
 humantime-serde = "1.1.1"
 
-scraper = { version = "0.27.0", features = ["deterministic"] }
+scraper = { version = "0.29.0", features = ["deterministic"] }
 
 serde_json = "1.0.97"
 jaq-core = "2.2.1"
