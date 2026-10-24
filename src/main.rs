@@ -320,6 +320,7 @@ fn write_unless_unmodified(path: &Path, data: &[u8]) -> Result<(), Box<dyn std::
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(path)?;
     let unmodified = {
         let mut buffer = Vec::new();
